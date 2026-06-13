@@ -1,0 +1,59 @@
+services:
+  # 1. КОНТЕЙНЕР ПРИЛОЖЕНИЯ (PHP-FPM)
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: yandex-parser-app-1
+    restart: always
+    volumes:
+      - ./:/var/www/html
+      - .env:/var/www/html/.env
+    depends_on:
+      - mysql
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # 2. КОНТЕЙНЕР ВЕБ-СЕРВЕРА (NGINX)
+  web:
+    image: nginx:alpine
+    container_name: yandex-parser-nginx-1
+    restart: always
+    ports:
+      - "8087:80" # 🌟 Новый сайт на сервере будет доступен по порту 8087!
+    volumes:
+      - ./:/var/www/html
+      - ./nginx.prod.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      - app
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # 3. КОНТЕЙНЕР БАЗЫ ДАННЫХ (MYSQL)
+  mysql:
+    image: mysql:8.0
+    container_name: yandex-parser-mysql-1
+    restart: always
+    environment:
+      MYSQL_DATABASE: yandex_parser
+      MYSQL_USER: sail
+      MYSQL_PASSWORD: secret_production_password
+      MYSQL_ROOT_PASSWORD: root_production_password
+    ports:
+      - "3309:3306" # 🌟 Новая база данных займет свободный порт 3309!
+    volumes:
+      - yandex_mysql_data:/var/lib/mysql
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  yandex_mysql_data:
