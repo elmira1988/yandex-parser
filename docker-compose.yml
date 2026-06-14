@@ -5,6 +5,7 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: yandex-parser-app-1
+    user: root
     restart: always
     volumes:
       - ./:/var/www/html
@@ -43,8 +44,8 @@ services:
     environment:
       MYSQL_DATABASE: yandex_parser
       MYSQL_USER: sail
-      MYSQL_PASSWORD: secret_production_password
-      MYSQL_ROOT_PASSWORD: root_production_password
+      MYSQL_PASSWORD: secret
+      MYSQL_ROOT_PASSWORD: root
     ports:
       - "3309:3306" # 🌟 Новая база данных займет свободный порт 3309!
     volumes:
