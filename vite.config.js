@@ -25,7 +25,6 @@ export default defineConfig({
         cors: true,
         hmr: {
             host: 'local.yandex-parser.ru',
-            clientPort: 5174,
         },
     },
 });

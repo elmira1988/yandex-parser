@@ -1,9 +1,13 @@
-# Настройка продакшен PHP-окружения
+# Настройка продакшен PHP-окружения на базе Alpine
 FROM php:8.4-fpm-alpine
+
 WORKDIR /var/www/html
 
 # Используем менеджер apk вместо apt-get для образов Alpine
 RUN apk update && apk add --no-cache \
+    chromium \
+    nodejs \
+    npm \
     libpng-dev \
     libjpeg-turbo-dev \
     freetype-dev \

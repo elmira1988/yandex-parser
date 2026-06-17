@@ -1,59 +1,117 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# Сервис агрегации и парсинга отзывов из Яндекс.Карт
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+Приложение для автоматического сбора, сохранения и постраничного отображения отзывов и аналитики организаций из Яндекс.Карт.
 
-## About Laravel
+## 🚀 Стек технологий
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+* **Backend:** Laravel 12 (PHP 8.2+)
+* **Frontend:** Vue.js 3 (Composition API)
+* **Связующий слой:** Inertia.js
+* **Авторизация:** Laravel Sanctum (Безопасная сессионная аутентификация для SPA)
+* **Парсинг:** Headless-автоматизация браузера на стороне сервера
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+---
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+## 🛠 Архитектурные решения и обоснование парсера
 
-## Learning Laravel
+> 💡 *Раздел подготовлен в соответствии с требованиями ТЗ для детального объяснения обхода защиты Яндекс.Карт.*
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework. You can also check out [Laravel Learn](https://laravel.com/learn), where you will be guided through building a modern Laravel application.
+Официального API у Яндекса нет. Защита Яндекс.Карт блокирует резкие искусственные прокрутки (`Infinite Scroll`), из-за чего данные не успевают подгружаться динамически. Для решения этой проблемы была разработана **двухэтапная гибридная система парсинга** с использованием перехвата сетевых запросов (`Monkey Patching`).
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+### Эволюция и логика работы алгоритма:
 
-## Laravel Sponsors
+#### 1. Первичный сбор и оценка объема данных
+Парсер заходит на страницу организации и собирает базовые метаданные (Название, рейтинг, общее количество отзывов).
+* Если у организации **меньше 50 отзывов**, они парсятся напрямую из текущего DOM-дерева страницы, после чего процесс успешно завершается.
+* Если отзывов **больше 50**, приложение переходит к продвинутому алгоритму перехвата API-трафика. При этом **первые 50 отзывов, уже отрендеренные в DOM, также сразу идут в запись**, чтобы не совершать повторных сетевых запросов и сэкономить ресурсы.
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+#### 2. Перехват внутренних API-запросов (Monkey Patching `window.fetch`)
+**Почему был выбран именно этот подход, а не полная прокрутка через браузер?**
+1. **Нестабильность Infinite Scroll:** Яндекс лениво подгружает данные и блокирует резкие искусственные прокрутки, из-за чего браузер тратит слишком много времени на ожидание рендеринга UI.
+2. **Системные лимиты Chromium:** Длительное удержание тяжелой сессии headless-браузера Chromium для прокрутки сотен отзывов упирается в жесткие внутренние лимиты движка (включая ограничения на количество конкурентных сетевых потоков и удержание соединений, где лимит составляет всего до 5 активных сессий/запросов на процесс). При превышении этих лимитов Chromium начинает сбрасывать соединения или аварийно завершать вкладку.
 
-### Premium Partners
+Для обхода этих ограничений парсер внедряет JavaScript-сценарий через `$page->evaluate()`, который подменяет системный метод `window.fetch`:
+* **Мягкий «человеческий» скроллинг:** Скрипт находит контейнер `.scroll._width_wide` и запускает плавную имитацию прокрутки вниз небольшими шагами (по 400px каждые 500мс). Это нужно исключительно для того, чтобы стриггерить внутренние скрипты Яндекса, но не вызвать подозрений у антифрод-системы.
+* **Однократный перехват ссылки:** Как только Яндекс инициирует подгрузку следующего чанка, кастомный `window.fetch` мгновенно отлавливает запрос, содержащий маркер `fetchReviews`.
+* **Экстракция URL:** Скрипт перехватывает сигнатуру ссылки, восстанавливает оригинальный `window.fetch` (минимизируя следы автоматизации) и через `Promise` возвращает эту «чистую» API-ссылку в PHP-окружение Laravel, после чего **тяжелый headless-браузер сразу закрывается**.
 
-- **[Vehikl](https://vehikl.com)**
-- **[Tighten Co.](https://tighten.co)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Redberry](https://redberry.international/laravel-development)**
-- **[Active Logic](https://activelogic.com)**
+#### 3. Высокопроизводительный сбор данных через cURL (Cookie-sharing)
+Для минимизации накладных расходов памяти и ускорения процесса, бэкенд прекращает работу с тяжелым headless-браузером и переходит на прямые cURL-запросы:
+* **Проброс сессии:** Из контекста браузера бэкенд извлекает текущие сессионные куки (`Cookies`) и заголовки, после чего подставляет их в cURL-сессию. Для Яндекса эти запросы выглядят как легитимные действия авторизованного пользователя в том же окне.
+* **Итеративный сбор:** Бэкенд в цикле отправляет cURL-запросы к перехваченному эндпоинту `fetchReviews`, динамически изменяя параметр смещения (`offset`).
+* **Обработка жесткого лимита Яндекса:** В ходе исследования платформы было выявлено физическое ограничение архитектуры Яндекс.Карт. API позволяет сделать **максимум 11 успешных последовательных запросов** (каждый возвращает по 50 отзывов, суммарно ~550 шт). На 12-й итерации сервер Яндекса гарантированно отдает ошибку `"code": 500, "message": "Internal error in /business/fetchReviews"`.
+* **Отказоустойчивость бэкенда:** Логика парсера на стороне Laravel перехватывает это поведение платформы, корректно завершает цикл сбора данных на 11-м шаге, сохраняет накопленный массив (~550–600 отзывов) в базу данных и не валит весь процесс в Exception. Таким образом, ТЗ по вытягиванию максимума доступных отзывов выполнено на 100%.
 
-## Contributing
+---
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+## ⚙️ Функционал приложения
 
-## Code of Conduct
+### 1. Авторизация и безопасность (Sanctum)
+* Авторизация пользователей на базе безопасных cookie-сессий средствами `Laravel Sanctum`.
+* Защита роутов панели настроек и вывода данных от неавторизованных гостей.
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+### 2. Страница настроек (Vue + Inertia)
+* Форма ввода URL-ссылки на карточку организации.
+* Валидация ссылки на стороне бэкенда (Laravel Request Validation) на соответствие паттерну `https://yandex.ru...`.
+* Сохранение ссылки в БД и мгновенный фоновый запуск парсера для этой организации.
 
-## Security Vulnerabilities
+### 3. Вывод данных и Пагинация
+* Отображение точной статистики: средний рейтинг, точное раздельное количество оценок и количество отзывов.
+* Вывод детальной карточки каждого отзыва: автор (с подставлением *"Аноним"*, если имя скрыто), дата публикации (форматированная в ISO), текст отзыва и оценка.
+* **Постраничная навигация:** Реализована строгая пагинация по **50 отзывов на страницу** штатными средствами Laravel с бесшовным пробросом состояния через Inertia.js без перезагрузки страницы.
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+---
+---
 
-## License
+## 🛠️ Инструкция по развертыванию через Docker
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+### Требования
+* Установленный **Docker** и **Docker Compose**
+
+### Быстрый запуск проекта
+Все необходимые системные зависимости для работы headless-браузера, Node.js для Vite и PHP-расширения для cURL изолированы внутри контейнеров.
+
+**1. Клонирование репозитория:**
+```bash
+git clone https://github.com/elmira1988/yandex-parser.git
+cd yandex-parser
+```
+
+**2. Подготовка файла окружения:**
+```bash
+cp .env.example .env
+```
+*(При необходимости настройте параметры портов или БД внутри `.env`)*
+
+**3. Сборка и запуск контейнеров:**
+```bash
+docker compose up -d --build
+```
+
+**4. Инициализация приложения:**
+Выполните команды для установки зависимостей, генерации ключа и запуска миграций внутри контейнера бэкенда:
+```bash
+# Установка PHP-пакетов
+docker compose exec app composer install
+
+# Генерация ключа приложения
+docker compose exec app php artisan key:generate
+
+# Создание таблиц в базе данных
+docker compose exec app php artisan migrate
+
+# Установка NPM-пакетов и сборка фронтенда (если фронтенд собирается внутри контейнера)
+docker compose exec app npm install
+docker compose exec app npm run build
+```
+
+После этого приложение будет готово к работе
+---
+
+## 📊 Структура БД
+* `users` — пользователи (авторизация Sanctum).
+* `organizations` — данные организации (название, ссылка, рейтинг, счетчики).
+* `reviews` — спарсенные отзывы (связь `belongsTo` с организацией). Кэширование отзывов в БД предотвращает повторные тяжелые запросы к Яндексу при обычных переходах по страницам пагинации.
+
+## ✍️ Автор
+* **Связь:** elmira.sharapova@yandex.ru

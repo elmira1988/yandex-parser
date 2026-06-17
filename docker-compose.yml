@@ -7,6 +7,8 @@ services:
     container_name: yandex-parser-app-1
     user: root
     restart: always
+    ports:
+      - "3000:3000"  # ПК думает, что это 5174, а Docker перенаправляет на 3000 внутри контейнера!
     volumes:
       - ./:/var/www/html
       - .env:/var/www/html/.env

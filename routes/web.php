@@ -14,6 +14,14 @@ Route::get('/', function () {
 Route::middleware(['auth', 'verified'])->group(function () {
     // Получение страницы и вывод отзывов по 50 штук по ТЗ
     Route::get('/dashboard', [YandexController::class, 'index'])->name('dashboard');
+
+    // Обработка формы добавления организации
+    Route::post('/organization', [YandexController::class, 'store'])->name('organization.store');
+
+    Route::get('/organizations/{organization}/reviews', [YandexController::class, 'getReviews'])->name('organizations.reviews');
+
+
+
 });
 
 // 3. Системные роуты профиля от Breeze
