@@ -172,14 +172,29 @@ class YandexParserService
             // Фиксируем итоговые данные страницы
             $finalUrl = $page->evaluate("window.location.href")->getReturnValue();
             $finalTitle = $page->evaluate("document.title")->getReturnValue();
-
             Log::info("=== РЕЗУЛЬТАТ ТЕСТА ОТКРЫТИЯ ===");
             Log::info("Итоговый URL страницы: " . $finalUrl);
             Log::info("Заголовок (Title) страницы: " . $finalTitle);
             Log::info("=================================");
 
-            // Обязательно даем 2 секунды на стороне PHP, чтобы Яндекс успел подгрузить данные в DOM
-            usleep(2000000);
+// --- ИСПРАВЛЕННЫЙ БЛОК ОЖИДАНИЯ ДЛЯ CHROME-PHP ---
+
+            try {
+                Log::info("Ожидаем рендеринга заголовка H1 и карточек отзывов...");
+
+                // 1. Ждем появление заголовка организации H1 (максимум 20 секунд)
+                $page->waitUntilContainsElement('h1', 20000);
+
+                // 2. Ждем появление хотя бы одного физического отзыва (максимум 20 секунд)
+                $page->waitUntilContainsElement('.business-review-view', 20000);
+
+                Log::info("Элементы DOM успешно дорендерились.");
+            } catch (\Throwable $e) {
+                Log::error("Ошибка ожидания элементов DOM перед evaluate: " . $e->getMessage());
+            }
+
+// 3. Железная микро-пауза, чтобы тяжелые JS-скрипты Яндекса полностью ожили в Docker
+            usleep(2500000);
 
             //МГНОВЕННЫЙ СБОР ВСЕХ ДАННЫХ ИЗ DOM ЗА ОДИН ШАГ
             Log::info(" Собираем текстовые отзывы из DOM дерева...");
